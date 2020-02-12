@@ -167,14 +167,14 @@ if __name__ == '__main__':
     log_eps = 1e-8
     n_epoch = 20
     n_labels = 2  # binary classification
-    visit_size = 256
-    hidden_size = 256
+    visit_size = 256 # size of input embedding
+    hidden_size = 256 # size of hidden layer
     gamma = 0.0 # setting for Focal Loss, when it's zero, it's equal to standard cross loss
     use_gpu = True
     layer = 1 # layer of Transformer
-    model_choice = 'TransformerTime'
+    model_choice = 'TransformerTime' # name of the proposed HiTANet in our paper
     model_file = eval(model_choice)
-    disease_list = ['hf_sample']
+    disease_list = ['hf_sample'] # name of the sample data set, you can place you own data set by following the same setting
     for disease in disease_list:
         model_name = 'tran_%s_%s_L%d_wt_1e-4_focal%.2f' % (model_choice, disease, layer, gamma)
         print(model_name)

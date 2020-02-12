@@ -67,23 +67,18 @@ class PositionalEncoding(nn.Module):
         """
         super(PositionalEncoding, self).__init__()
 
-        # 根据论文给的公式，构造出PE矩阵
+
         position_encoding = np.array([
             [pos / np.power(10000, 2.0 * (j // 2) / d_model) for j in range(d_model)]
             for pos in range(max_seq_len)])
-        # 偶数列使用sin，奇数列使用cos
+
         position_encoding[:, 0::2] = np.sin(position_encoding[:, 0::2])
         position_encoding[:, 1::2] = np.cos(position_encoding[:, 1::2])
         position_encoding = torch.from_numpy(position_encoding.astype(np.float32))
-        # 在PE矩阵的第一行，加上一行全是0的向量，代表这`PAD`的positional encoding
-        # 在word embedding中也经常会加上`UNK`，代表位置单词的word embedding，两者十分类似
-        # 那么为什么需要这个额外的PAD的编码呢？很简单，因为文本序列的长度不一，我们需要对齐，
-        # 短的序列我们使用0在结尾补全，我们也需要这些补全位置的编码，也就是`PAD`对应的位置编码
+
         pad_row = torch.zeros([1, d_model])
         position_encoding = torch.cat((pad_row, position_encoding))
 
-        # 嵌入操作，+1是因为增加了`PAD`这个补全位置的编码，
-        # Word embedding中如果词典增加`UNK`，我们也需要+1。看吧，两者十分相似
         self.position_encoding = nn.Embedding(max_seq_len + 1, d_model)
         self.position_encoding.weight = nn.Parameter(position_encoding,
                                                      requires_grad=False)
@@ -98,11 +93,9 @@ class PositionalEncoding(nn.Module):
           返回这一批序列的位置编码，进行了对齐。
         """
 
-        # 找出这一批序列的最大长度
         max_len = torch.max(input_len)
         tensor = torch.cuda.LongTensor if input_len.is_cuda else torch.LongTensor
-        # 对每一个序列的位置进行对齐，在原序列位置的后面补上0
-        # 这里range从1开始也是因为要避开PAD(0)的位置
+
         pos = np.zeros([len(input_len), max_len])
         for ind, length in enumerate(input_len):
             for pos_ind in range(1, length + 1):
@@ -397,83 +390,6 @@ class EncoderPure(nn.Module):
         # weight = torch.softmax(self.weight_layer(outputs[-1]), dim=1)
         # weight = weight * mask - 255 * (1 - mask)
         return output
-
-
-class SAND(nn.Module):
-    def __init__(self,
-                 vocab_size,
-                 batch_size,
-                 options,
-                 num_layers=1,
-                 model_dim=256,
-                 num_heads=4,
-                 ffn_dim=1024,
-                 out_dim=2,
-                 dropout=0.0,
-                 M=4):
-        super(SAND, self).__init__()
-
-        self.encoder_layers = MultiHeadAttention(model_dim, num_heads, dropout)
-        self.pre_embedding = Embedding(vocab_size+1, model_dim)
-        self.bias_embedding = torch.nn.Parameter(torch.Tensor(model_dim))
-        bound = 1 / math.sqrt(vocab_size)
-        init.uniform_(self.bias_embedding, -bound, bound)
-
-        self.weight_layer = torch.nn.Linear(model_dim, 1)
-        self.pos_embedding = PositionalEncoding(model_dim, 51)
-        #self.time_layer = torch.nn.Linear(64, 256)
-        #self.selection_layer = torch.nn.Linear(1, 64)
-        self.drop_out = nn.Dropout(dropout)
-        self.out_layer = nn.Linear(model_dim*M, out_dim)
-        self.relu = nn.ReLU()
-        self.tanh = nn.Tanh()
-        self.M = M
-
-    def padding_mask(self, seq_k, seq_q):
-        len_q = seq_q.size(1)
-        pad_mask = seq_k.eq(0)
-        pad_mask = pad_mask.unsqueeze(1).expand(-1, len_q, -1)  # shape [B, L_q, L_k]
-        return pad_mask
-
-    def forward(self, seq_dignosis_codes, seq_time_step, batch_labels, options, maxlen):
-        # seq_time_step = torch.Tensor(seq_time_step).cuda().unsqueeze(2)/180
-        # time_feature = 1 - self.tanh(torch.pow(self.selection_layer(seq_time_step), 2))
-        # time_feature = self.time_layer(time_feature)
-        seq_time_step = np.array(list(units.pad_time(seq_time_step, options)))
-        lengths = torch.from_numpy(np.array([len(seq) for seq in seq_dignosis_codes])).cuda()
-        diagnosis_codes, labels, mask, mask_final, mask_code = units.pad_matrix_new(seq_dignosis_codes,
-                                                                                        batch_labels, options)
-        if options['use_gpu']:
-            diagnosis_codes = torch.LongTensor(diagnosis_codes).cuda()
-            mask_mult = torch.Tensor(mask).unsqueeze(2).cuda()
-            mask_final = torch.Tensor(mask_final).unsqueeze(2).cuda()
-            mask_code = torch.Tensor(mask_code).unsqueeze(3).cuda()
-        else:
-            diagnosis_codes = torch.LongTensor(diagnosis_codes)
-            mask_mult = torch.Tensor(mask).unsqueeze(2)
-            mask_final = torch.Tensor(mask_final).unsqueeze(2)
-            mask_code = torch.Tensor(mask_code).unsqueeze(3)
-
-        output = (self.pre_embedding(diagnosis_codes) * mask_code).sum(dim=2) + self.bias_embedding
-        # output += time_feature
-        output_pos, ind_pos = self.pos_embedding(lengths.unsqueeze(1))
-        output += output_pos
-        self_attention_mask = padding_mask(ind_pos, ind_pos)
-        output, attention = self.encoder_layers(output, output, output, self_attention_mask)
-        U = torch.zeros((output.size(0), self.M, output.size(2))).cuda()
-        lengths = lengths.float()
-        for t in range(1, diagnosis_codes.size(1)+1):
-            s = self.M * t / lengths
-            for m in range(1, self.M+1):
-                w = torch.pow(1 - torch.abs(s - m) / self.M, 2)
-                U[:, m-1] += w.unsqueeze(-1) * output[:, t-1]
-        U = U.view(diagnosis_codes.size(0), -1)
-        U = self.drop_out(U)
-        output = self.out_layer(U)
-        labels = torch.LongTensor(labels)
-        if options['use_gpu']:
-            labels = labels.cuda()
-        return output, labels, None
 
 
 
