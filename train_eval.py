@@ -1,10 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Created on Fri Nov 29 19:27:59 2019
-
-@author: ffm5105
-"""
 
 import os
 import pickle

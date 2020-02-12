@@ -33,18 +33,6 @@ class ScaledDotProductAttention(nn.Module):
         self.softmax = nn.Softmax(dim=2)
 
     def forward(self, q, k, v, scale=None, attn_mask=None):
-        """前向传播.
-
-        Args:
-        	q: Queries张量，形状为[B, L_q, D_q]
-        	k: Keys张量，形状为[B, L_k, D_k]
-        	v: Values张量，形状为[B, L_v, D_v]，一般来说就是k
-        	scale: 缩放因子，一个浮点标量
-        	attn_mask: Masking张量，形状为[B, L_q, L_k]
-
-        Returns:
-        	上下文张量和attetention张量
-        """
         attention = torch.bmm(q, k.transpose(1, 2))
         if scale:
             attention = attention * scale
@@ -59,12 +47,7 @@ class ScaledDotProductAttention(nn.Module):
 class PositionalEncoding(nn.Module):
 
     def __init__(self, d_model, max_seq_len):
-        """初始化。
 
-        Args:
-            d_model: 一个标量。模型的维度，论文默认是512
-            max_seq_len: 一个标量。文本序列的最大长度
-        """
         super(PositionalEncoding, self).__init__()
 
 
@@ -84,14 +67,7 @@ class PositionalEncoding(nn.Module):
                                                      requires_grad=False)
 
     def forward(self, input_len):
-        """神经网络的前向传播。
 
-        Args:
-          input_len: 一个张量，形状为[BATCH_SIZE, 1]。每一个张量的值代表这一批文本序列中对应的长度。
-
-        Returns:
-          返回这一批序列的位置编码，进行了对齐。
-        """
 
         max_len = torch.max(input_len)
         tensor = torch.cuda.LongTensor if input_len.is_cuda else torch.LongTensor
